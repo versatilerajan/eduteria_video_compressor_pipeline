@@ -13,8 +13,6 @@ class Settings(BaseSettings):
     mongodb_db_name: str = "video_pipeline"
 
     azure_storage_connection_string: str
-    azure_storage_account: str
-    azure_storage_key: str
 
     azure_container_name: str
     azure_container_temp: Optional[str] = None
