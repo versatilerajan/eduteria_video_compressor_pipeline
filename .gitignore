@@ -10,7 +10,4 @@ storage/thumbnails/*
 !storage/temp/.gitkeep
 !storage/processed/.gitkeep
 !storage/thumbnails/.gitkeep
-logs/
-*.egg-info/
-.DS_Store
 .env.example
