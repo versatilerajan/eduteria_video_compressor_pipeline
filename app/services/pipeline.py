@@ -79,12 +79,13 @@ class VideoProcessingPipeline:
         hls_output_dir = str(Path(self._config.storage_processed_dir) / f"{video_id}_hls")
 
         cleanup_paths = [temp_input_path, processed_output_path, thumbnail_output_path]
+        temp_blob_path = self._blob_storage.build_blob_path(self._config.folder_temp, blob_name)
 
         try:
             await self._update_status(video_id, VideoStatus.PROCESSING, title=title)
 
             await self._blob_storage.download_blob(
-                self._config.temp_container, blob_name, temp_input_path
+                self._config.container_temp, temp_blob_path, temp_input_path
             )
 
             await self._validation.validate_all(temp_input_path)
@@ -139,16 +140,22 @@ class VideoProcessingPipeline:
             await self._update_status(video_id, VideoStatus.UPLOADING_RESULT)
 
             processed_blob_url = await self._blob_storage.upload_file(
-                self._config.processed_container, f"{video_id}.mp4", processed_output_path
+                self._config.container_processed,
+                self._blob_storage.build_blob_path(self._config.folder_processed, f"{video_id}.mp4"),
+                processed_output_path,
             )
             thumbnail_blob_url = await self._blob_storage.upload_file(
-                self._config.thumbnail_container, f"{video_id}.jpg", thumbnail_output_path
+                self._config.container_thumbnail,
+                self._blob_storage.build_blob_path(self._config.folder_thumbnail, f"{video_id}.jpg"),
+                thumbnail_output_path,
             )
             hls_blob_url = await self._blob_storage.upload_directory(
-                self._config.hls_container, video_id, hls_output_dir
+                self._config.container_hls,
+                self._blob_storage.build_blob_path(self._config.folder_hls, video_id),
+                hls_output_dir,
             )
 
-            await self._blob_storage.delete_blob(self._config.temp_container, blob_name)
+            await self._blob_storage.delete_blob(self._config.container_temp, temp_blob_path)
 
             self._cleanup.delete_files(cleanup_paths)
             self._cleanup.delete_directory(hls_output_dir)

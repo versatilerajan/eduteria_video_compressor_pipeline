@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as video_router
 from app.config.settings import settings
 from app.database.mongodb import mongodb_connection
+from app.services.blob_storage import BlobStorageService
 from app.utils.logger import app_logger
 
 
@@ -20,11 +21,26 @@ def _ensure_storage_directories() -> None:
         Path(directory).mkdir(parents=True, exist_ok=True)
 
 
+async def _ensure_blob_containers() -> None:
+    """Ensure every Azure container currently in use exists, without manual setup."""
+    blob_storage = BlobStorageService()
+    containers = {
+        settings.container_temp,
+        settings.container_processed,
+        settings.container_thumbnail,
+        settings.container_hls,
+    }
+    for container_name in containers:
+        await blob_storage.ensure_container(container_name)
+    await blob_storage.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown of shared resources for the application."""
     _ensure_storage_directories()
     await mongodb_connection.connect()
+    await _ensure_blob_containers()
     app_logger.info("Video processing service started")
     yield
     await mongodb_connection.disconnect()

@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,10 +15,17 @@ class Settings(BaseSettings):
     azure_storage_connection_string: str
     azure_storage_account: str
     azure_storage_key: str
-    temp_container: str
-    processed_container: str
-    thumbnail_container: str
-    hls_container: str
+
+    azure_container_name: str
+    azure_container_temp: Optional[str] = None
+    azure_container_processed: Optional[str] = None
+    azure_container_thumbnail: Optional[str] = None
+    azure_container_hls: Optional[str] = None
+
+    folder_temp: str = "temp"
+    folder_processed: str = "processed"
+    folder_thumbnail: str = "thumbnails"
+    folder_hls: str = "hls"
 
     service_bus_connection_string: str
     service_bus_queue: str
@@ -43,6 +50,26 @@ class Settings(BaseSettings):
 
     worker_max_concurrent_messages: int = 4
     worker_poll_wait_seconds: int = 5
+
+    @property
+    def container_temp(self) -> str:
+        """Return the container used for temporary uploads, defaulting to the shared container."""
+        return self.azure_container_temp or self.azure_container_name
+
+    @property
+    def container_processed(self) -> str:
+        """Return the container used for processed videos, defaulting to the shared container."""
+        return self.azure_container_processed or self.azure_container_name
+
+    @property
+    def container_thumbnail(self) -> str:
+        """Return the container used for thumbnails, defaulting to the shared container."""
+        return self.azure_container_thumbnail or self.azure_container_name
+
+    @property
+    def container_hls(self) -> str:
+        """Return the container used for HLS output, defaulting to the shared container."""
+        return self.azure_container_hls or self.azure_container_name
 
     @property
     def allowed_extensions_list(self) -> List[str]:

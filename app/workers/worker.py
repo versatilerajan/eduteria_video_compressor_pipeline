@@ -1,6 +1,8 @@
 import asyncio
 from typing import Dict
 
+from app.config.settings import settings
+from app.services.blob_storage import BlobStorageService
 from app.services.factory import build_pipeline
 from app.services.queue import ServiceBusQueueService
 from app.utils.logger import app_logger
@@ -11,6 +13,19 @@ class VideoProcessingWorker:
 
     def __init__(self) -> None:
         self._queue_service = ServiceBusQueueService()
+
+    async def _ensure_blob_containers(self) -> None:
+        """Ensure every Azure container currently in use exists before processing jobs."""
+        blob_storage = BlobStorageService()
+        containers = {
+            settings.container_temp,
+            settings.container_processed,
+            settings.container_thumbnail,
+            settings.container_hls,
+        }
+        for container_name in containers:
+            await blob_storage.ensure_container(container_name)
+        await blob_storage.close()
 
     async def _handle_message(self, payload: Dict) -> None:
         """Handle a single decoded queue message by running it through the pipeline."""
@@ -27,6 +42,7 @@ class VideoProcessingWorker:
 
     async def run_forever(self) -> None:
         """Start the infinite consume loop for the worker."""
+        await self._ensure_blob_containers()
         app_logger.info("Video processing worker started, listening for jobs")
         await self._queue_service.consume_forever(self._handle_message)
 
