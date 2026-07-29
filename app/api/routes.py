@@ -1,0 +1,117 @@
+import asyncio
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, HTTPException, status
+from motor.motor_asyncio import AsyncIOMotorCollection
+
+from app.config.settings import settings
+from app.database.mongodb import get_videos_collection, mongodb_connection
+from app.models.video import VideoStatus
+from app.schemas.video import HealthResponse, ProcessVideoRequest, ProcessVideoResponse, VideoResponse
+from app.services.factory import build_pipeline
+from app.services.queue import ServiceBusQueueService
+from app.utils.logger import app_logger
+
+router = APIRouter()
+
+
+def _document_to_response(document: dict) -> VideoResponse:
+    """Convert a raw MongoDB document into a VideoResponse schema instance."""
+    return VideoResponse(
+        id=document["_id"],
+        title=document.get("title"),
+        status=document.get("status", VideoStatus.QUEUED.value),
+        original_size=document.get("original_size"),
+        compressed_size=document.get("compressed_size"),
+        duration=document.get("duration"),
+        width=document.get("width"),
+        height=document.get("height"),
+        codec=document.get("codec"),
+        fps=document.get("fps"),
+        bitrate=document.get("bitrate"),
+        sha256=document.get("sha256"),
+        blob_url=document.get("blob_url"),
+        thumbnail_url=document.get("thumbnail_url"),
+        hls_url=document.get("hls_url"),
+        is_duplicate=document.get("is_duplicate", False),
+        error_message=document.get("error_message"),
+        created_at=document.get("created_at").isoformat() if document.get("created_at") else None,
+        updated_at=document.get("updated_at").isoformat() if document.get("updated_at") else None,
+    )
+
+
+async def _run_pipeline_background(video_id: str, blob_name: str, title: str | None) -> None:
+    """Execute the processing pipeline in the background without blocking the request."""
+    pipeline = build_pipeline()
+    await pipeline.process(video_id=video_id, blob_name=blob_name, title=title)
+
+
+@router.post("/process-video", response_model=ProcessVideoResponse, status_code=status.HTTP_202_ACCEPTED)
+async def process_video(request: ProcessVideoRequest) -> ProcessVideoResponse:
+    """Accept a video processing request and enqueue it for asynchronous processing."""
+    videos_collection: AsyncIOMotorCollection = get_videos_collection()
+
+    await videos_collection.update_one(
+        {"_id": request.videoId},
+        {
+            "$set": {
+                "title": request.title,
+                "status": VideoStatus.QUEUED.value,
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
+        },
+        upsert=True,
+    )
+
+    try:
+        queue_service = ServiceBusQueueService()
+        await queue_service.send_message(
+            {"videoId": request.videoId, "blobName": request.blobName, "title": request.title}
+        )
+        await queue_service.close()
+    except Exception as error:
+        app_logger.warning("Service Bus unavailable, falling back to in-process background task: {}", error)
+        asyncio.create_task(_run_pipeline_background(request.videoId, request.blobName, request.title))
+
+    return ProcessVideoResponse(status="accepted", videoId=request.videoId)
+
+
+@router.get("/video/{video_id}", response_model=VideoResponse)
+async def get_video(video_id: str) -> VideoResponse:
+    """Fetch the current processing status and metadata for a video."""
+    videos_collection: AsyncIOMotorCollection = get_videos_collection()
+    document = await videos_collection.find_one({"_id": video_id})
+
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+
+    return _document_to_response(document)
+
+
+@router.get("/health", response_model=HealthResponse)
+async def health_check() -> HealthResponse:
+    """Report the health of the service and its critical dependencies."""
+    mongodb_status = "ok"
+    try:
+        mongodb_connection.get_database()
+    except RuntimeError:
+        mongodb_status = "unavailable"
+
+    ffmpeg_status = "ok"
+    try:
+        process = await asyncio.create_subprocess_exec(
+            settings.ffmpeg_path,
+            "-version",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await process.communicate()
+        if process.returncode != 0:
+            ffmpeg_status = "unavailable"
+    except FileNotFoundError:
+        ffmpeg_status = "unavailable"
+
+    overall_status = "healthy" if mongodb_status == "ok" and ffmpeg_status == "ok" else "degraded"
+
+    return HealthResponse(status=overall_status, mongodb=mongodb_status, ffmpeg=ffmpeg_status)

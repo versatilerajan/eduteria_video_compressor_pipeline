@@ -1,0 +1,74 @@
+from functools import lru_cache
+from typing import List
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Centralized application configuration loaded from environment variables."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    mongodb_uri: str
+    mongodb_db_name: str = "video_pipeline"
+
+    azure_storage_connection_string: str
+    azure_storage_account: str
+    azure_storage_key: str
+    temp_container: str
+    processed_container: str
+    thumbnail_container: str
+    hls_container: str
+
+    service_bus_connection_string: str
+    service_bus_queue: str
+
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
+
+    max_upload_size_mb: int = 500
+    allowed_extensions: str = ".mp4,.mov,.mkv,.avi,.webm"
+    target_min_size_mb: int = 20
+    target_max_size_mb: int = 30
+
+    storage_temp_dir: str = "storage/temp"
+    storage_processed_dir: str = "storage/processed"
+    storage_thumbnail_dir: str = "storage/thumbnails"
+
+    thumbnail_offset_seconds: int = 10
+    hls_segment_seconds: int = 6
+
+    log_level: str = "INFO"
+    log_file: str = "logs/app.log"
+
+    worker_max_concurrent_messages: int = 4
+    worker_poll_wait_seconds: int = 5
+
+    @property
+    def allowed_extensions_list(self) -> List[str]:
+        """Return normalized list of allowed file extensions."""
+        return [ext.strip().lower() for ext in self.allowed_extensions.split(",") if ext.strip()]
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        """Return maximum upload size expressed in bytes."""
+        return self.max_upload_size_mb * 1024 * 1024
+
+    @property
+    def target_min_size_bytes(self) -> int:
+        """Return target minimum compressed size expressed in bytes."""
+        return self.target_min_size_mb * 1024 * 1024
+
+    @property
+    def target_max_size_bytes(self) -> int:
+        """Return target maximum compressed size expressed in bytes."""
+        return self.target_max_size_mb * 1024 * 1024
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return a cached singleton instance of the application settings."""
+    return Settings()
+
+
+settings = get_settings()

@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+motor==3.6.0
+azure-storage-blob==12.24.0
+azure-servicebus==7.14.0
+python-dotenv==1.0.1
+opencv-python-headless==4.10.0.84
+ffmpeg-python==0.2.0
+loguru==0.7.3
+aiofiles==24.1.0
+pytest==8.3.4
+pytest-asyncio==0.25.2
+httpx==0.28.1
