@@ -6,4 +6,3 @@ storage/thumbnails/*
 !storage/temp/.gitkeep
 !storage/processed/.gitkeep
 !storage/thumbnails/.gitkeep
-.env.example
