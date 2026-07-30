@@ -18,6 +18,14 @@ class ProcessVideoResponse(BaseModel):
     videoId: str
 
 
+class UploadVideoResponse(BaseModel):
+    """Response returned after a raw video file has been stored in the temp container."""
+
+    videoId: str
+    blobName: str
+    originalSize: int
+
+
 class VideoResponse(BaseModel):
     """Response representing the current state of a video resource."""
 
