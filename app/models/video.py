@@ -1,37 +1,26 @@
-from typing import Optional
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
 
-class ProcessVideoRequest(BaseModel):
-    """Request payload to trigger video processing."""
+class VideoStatus(str, Enum):
+    UPLOADING = "uploading"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPRESSING = "compressing"
+    UPLOADING_RESULT = "uploading_result"
+    READY = "ready"
+    FAILED = "failed"
 
-    videoId: str = Field(..., min_length=1)
-    blobName: str = Field(..., min_length=1)
+
+class VideoDocument(BaseModel):
+    """Represents the persisted MongoDB document for a video resource."""
+
+    id: str = Field(alias="_id")
     title: Optional[str] = None
-
-
-class ProcessVideoResponse(BaseModel):
-    """Response returned immediately after accepting a processing request."""
-
-    status: str
-    videoId: str
-
-
-class UploadVideoResponse(BaseModel):
-    """Response returned after a raw video file has been stored in the temp container."""
-
-    videoId: str
-    blobName: str
-    originalSize: int
-
-
-class VideoResponse(BaseModel):
-    """Response representing the current state of a video resource."""
-
-    id: str
-    title: Optional[str] = None
-    status: str
+    status: VideoStatus = VideoStatus.QUEUED
     original_size: Optional[int] = None
     compressed_size: Optional[int] = None
     duration: Optional[float] = None
@@ -46,13 +35,12 @@ class VideoResponse(BaseModel):
     hls_url: Optional[str] = None
     is_duplicate: bool = False
     error_message: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    model_config = {"populate_by_name": True, "use_enum_values": True}
 
-class HealthResponse(BaseModel):
-    """Response for the health check endpoint."""
-
-    status: str
-    mongodb: str
-    ffmpeg: str
+    def to_mongo(self) -> Dict[str, Any]:
+        """Serialize the model into a MongoDB-ready dictionary."""
+        payload = self.model_dump(by_alias=True, exclude_none=False)
+        return payload
