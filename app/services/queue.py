@@ -27,13 +27,18 @@ class ServiceBusQueueService:
             app_logger.info("Published message to queue '{}': {}", self._config.service_bus_queue, payload)
 
     async def consume_forever(self, handler: MessageHandler) -> None:
-        """Continuously receive messages and invoke the handler, completing or abandoning as needed."""
-        async with self._client.get_queue_receiver(
-            queue_name=self._config.service_bus_queue,
-            max_wait_time=self._config.worker_poll_wait_seconds,
-        ) as receiver:
-            async for message in receiver:
-                await self._handle_single_message(receiver, message, handler)
+        """Continuously receive messages and invoke the handler, completing or abandoning as needed.
+
+        The Service Bus SDK's async iterator stops once ``max_wait_time`` elapses with no new
+        messages, so the receiver is re-opened in an outer loop to keep listening indefinitely.
+        """
+        while True:
+            async with self._client.get_queue_receiver(
+                queue_name=self._config.service_bus_queue,
+                max_wait_time=self._config.worker_poll_wait_seconds,
+            ) as receiver:
+                async for message in receiver:
+                    await self._handle_single_message(receiver, message, handler)
 
     @staticmethod
     async def _handle_single_message(
