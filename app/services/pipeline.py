@@ -72,21 +72,16 @@ class VideoProcessingPipeline:
         await self._notification.notify(video_id, status)
 
     async def process(self, video_id: str, blob_name: str, title: Optional[str] = None) -> ProcessingResult:
-        """Run the full processing pipeline for a single video and return the result."""
-        temp_input_path = str(Path(self._config.storage_temp_dir) / f"{video_id}_{blob_name}")
+        """Run the full processing pipeline for a single, already-uploaded local video file."""
+        temp_input_path = str(Path(self._config.storage_temp_dir) / blob_name)
         processed_output_path = str(Path(self._config.storage_processed_dir) / f"{video_id}.mp4")
         thumbnail_output_path = str(Path(self._config.storage_thumbnail_dir) / f"{video_id}.jpg")
         hls_output_dir = str(Path(self._config.storage_processed_dir) / f"{video_id}_hls")
 
         cleanup_paths = [temp_input_path, processed_output_path, thumbnail_output_path]
-        temp_blob_path = self._blob_storage.build_blob_path(self._config.folder_temp, blob_name)
 
         try:
             await self._update_status(video_id, VideoStatus.PROCESSING, title=title)
-
-            await self._blob_storage.download_blob(
-                self._config.container_temp, temp_blob_path, temp_input_path
-            )
 
             await self._validation.validate_all(temp_input_path)
 
@@ -155,8 +150,6 @@ class VideoProcessingPipeline:
                 hls_output_dir,
             )
 
-            await self._blob_storage.delete_blob(self._config.container_temp, temp_blob_path)
-
             self._cleanup.delete_files(cleanup_paths)
             self._cleanup.delete_directory(hls_output_dir)
 
@@ -197,3 +190,6 @@ class VideoProcessingPipeline:
                 is_duplicate=False,
                 error_message=str(error),
             )
+
+        finally:
+            await self._blob_storage.close()

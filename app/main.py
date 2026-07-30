@@ -25,7 +25,6 @@ async def _ensure_blob_containers() -> None:
     """Ensure every Azure container currently in use exists, without manual setup."""
     blob_storage = BlobStorageService()
     containers = {
-        settings.container_temp,
         settings.container_processed,
         settings.container_thumbnail,
         settings.container_hls,

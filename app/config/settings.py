@@ -15,18 +15,13 @@ class Settings(BaseSettings):
     azure_storage_connection_string: str
 
     azure_container_name: str
-    azure_container_temp: Optional[str] = None
     azure_container_processed: Optional[str] = None
     azure_container_thumbnail: Optional[str] = None
     azure_container_hls: Optional[str] = None
 
-    folder_temp: str = "temp"
     folder_processed: str = "processed"
     folder_thumbnail: str = "thumbnails"
     folder_hls: str = "hls"
-
-    service_bus_connection_string: str
-    service_bus_queue: str
 
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
@@ -45,14 +40,6 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
     log_file: str = "logs/app.log"
-
-    worker_max_concurrent_messages: int = 4
-    worker_poll_wait_seconds: int = 5
-
-    @property
-    def container_temp(self) -> str:
-        """Return the container used for temporary uploads, defaulting to the shared container."""
-        return self.azure_container_temp or self.azure_container_name
 
     @property
     def container_processed(self) -> str:

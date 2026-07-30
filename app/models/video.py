@@ -6,8 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class VideoStatus(str, Enum):
-    UPLOADING = "uploading"
-    QUEUED = "queued"
+    UPLOADED = "uploaded"
     PROCESSING = "processing"
     COMPRESSING = "compressing"
     UPLOADING_RESULT = "uploading_result"
@@ -20,7 +19,7 @@ class VideoDocument(BaseModel):
 
     id: str = Field(alias="_id")
     title: Optional[str] = None
-    status: VideoStatus = VideoStatus.QUEUED
+    status: VideoStatus = VideoStatus.UPLOADED
     original_size: Optional[int] = None
     compressed_size: Optional[int] = None
     duration: Optional[float] = None

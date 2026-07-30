@@ -58,21 +58,6 @@ class BlobStorageService:
             await self._client.close()
             self._client = None
 
-    async def download_blob(self, container_name: str, blob_name: str, destination_path: str) -> str:
-        """Download a blob from Azure to a local file path."""
-        Path(destination_path).parent.mkdir(parents=True, exist_ok=True)
-        await self.ensure_container(container_name)
-        container_client = self._get_container_client(container_name)
-        blob_client = container_client.get_blob_client(blob_name)
-
-        stream = await blob_client.download_blob()
-        with open(destination_path, "wb") as file_handle:
-            data = await stream.readall()
-            file_handle.write(data)
-
-        app_logger.info("Downloaded blob '{}/{}' to '{}'", container_name, blob_name, destination_path)
-        return destination_path
-
     async def upload_file(self, container_name: str, blob_name: str, source_path: str) -> str:
         """Upload a local file to a container and return its blob URL."""
         await self.ensure_container(container_name)
@@ -104,9 +89,4 @@ class BlobStorageService:
         app_logger.info("Uploaded directory '{}' to container '{}' under prefix '{}'", source_dir, container_name, blob_prefix)
         return base_url
 
-    async def delete_blob(self, container_name: str, blob_name: str) -> None:
-        """Delete a blob from a container if it exists."""
-        container_client = self._get_container_client(container_name)
-        blob_client = container_client.get_blob_client(blob_name)
-        await blob_client.delete_blob()
-        app_logger.info("Deleted blob '{}/{}'", container_name, blob_name)
+

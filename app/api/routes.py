@@ -18,9 +18,7 @@ from app.schemas.video import (
     UploadVideoResponse,
     VideoResponse,
 )
-from app.services.blob_storage import BlobStorageService
 from app.services.factory import build_pipeline
-from app.services.queue import ServiceBusQueueService
 from app.utils.logger import app_logger
 
 router = APIRouter()
@@ -33,7 +31,7 @@ def _document_to_response(document: dict) -> VideoResponse:
     return VideoResponse(
         id=document["_id"],
         title=document.get("title"),
-        status=document.get("status", VideoStatus.QUEUED.value),
+        status=document.get("status", VideoStatus.UPLOADED.value),
         original_size=document.get("original_size"),
         compressed_size=document.get("compressed_size"),
         duration=document.get("duration"),
@@ -61,7 +59,12 @@ async def _run_pipeline_background(video_id: str, blob_name: str, title: str | N
 
 @router.post("/upload-video", response_model=UploadVideoResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(file: UploadFile = File(...), title: str | None = Form(None)) -> UploadVideoResponse:
-    """Stream an uploaded video file to disk, push it to the temp blob container, and record it."""
+    """Stream an uploaded video file to local temp storage and record it.
+
+    The raw file stays on local disk only - it is never pushed to blob storage. Blob
+    storage only ever receives the compressed result once /process-video finishes, so a
+    100MB upload never turns into a 100MB blob; only the ~30MB compressed output does.
+    """
     extension = Path(file.filename or "").suffix.lower()
     if extension not in settings.allowed_extensions_list:
         raise HTTPException(
@@ -92,15 +95,6 @@ async def upload_video(file: UploadFile = File(...), title: str | None = Form(No
     finally:
         await file.close()
 
-    blob_storage = BlobStorageService()
-    try:
-        temp_blob_path = blob_storage.build_blob_path(settings.folder_temp, blob_name)
-        await blob_storage.upload_file(settings.container_temp, temp_blob_path, str(local_path))
-    finally:
-        await blob_storage.close()
-        if local_path.exists():
-            os.remove(local_path)
-
     videos_collection: AsyncIOMotorCollection = get_videos_collection()
     now = datetime.now(timezone.utc)
     await videos_collection.update_one(
@@ -108,7 +102,7 @@ async def upload_video(file: UploadFile = File(...), title: str | None = Form(No
         {
             "$set": {
                 "title": title,
-                "status": VideoStatus.UPLOADING.value,
+                "status": VideoStatus.UPLOADED.value,
                 "original_size": total_bytes,
                 "updated_at": now,
             },
@@ -117,13 +111,18 @@ async def upload_video(file: UploadFile = File(...), title: str | None = Form(No
         upsert=True,
     )
 
-    app_logger.info("Uploaded video '{}' ({} bytes) to temp container as '{}'", video_id, total_bytes, temp_blob_path)
-    return UploadVideoResponse(videoId=video_id, blobName=temp_blob_path, originalSize=total_bytes)
+    app_logger.info("Uploaded video '{}' ({} bytes) to local temp storage as '{}'", video_id, total_bytes, blob_name)
+    return UploadVideoResponse(videoId=video_id, blobName=blob_name, originalSize=total_bytes)
 
 
 @router.post("/process-video", response_model=ProcessVideoResponse, status_code=status.HTTP_202_ACCEPTED)
 async def process_video(request: ProcessVideoRequest) -> ProcessVideoResponse:
-    """Accept a video processing request and enqueue it for asynchronous processing."""
+    """Kick off compression for a previously uploaded video.
+
+    Runs the pipeline directly as an in-process background task - there is no external
+    queue in the middle, so nothing can get stuck waiting on a broker. The video is
+    compressed locally and only the compressed result is uploaded to blob storage.
+    """
     videos_collection: AsyncIOMotorCollection = get_videos_collection()
 
     await videos_collection.update_one(
@@ -131,7 +130,7 @@ async def process_video(request: ProcessVideoRequest) -> ProcessVideoResponse:
         {
             "$set": {
                 "title": request.title,
-                "status": VideoStatus.QUEUED.value,
+                "status": VideoStatus.PROCESSING.value,
                 "updated_at": datetime.now(timezone.utc),
             },
             "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
@@ -139,15 +138,7 @@ async def process_video(request: ProcessVideoRequest) -> ProcessVideoResponse:
         upsert=True,
     )
 
-    try:
-        queue_service = ServiceBusQueueService()
-        await queue_service.send_message(
-            {"videoId": request.videoId, "blobName": request.blobName, "title": request.title}
-        )
-        await queue_service.close()
-    except Exception as error:
-        app_logger.warning("Service Bus unavailable, falling back to in-process background task: {}", error)
-        asyncio.create_task(_run_pipeline_background(request.videoId, request.blobName, request.title))
+    asyncio.create_task(_run_pipeline_background(request.videoId, request.blobName, request.title))
 
     return ProcessVideoResponse(status="accepted", videoId=request.videoId)
 
