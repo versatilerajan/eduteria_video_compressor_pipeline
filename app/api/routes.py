@@ -1,18 +1,31 @@
 import asyncio
+import os
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, status
+import aiofiles
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from app.config.settings import settings
 from app.database.mongodb import get_videos_collection, mongodb_connection
 from app.models.video import VideoStatus
-from app.schemas.video import HealthResponse, ProcessVideoRequest, ProcessVideoResponse, VideoResponse
+from app.schemas.video import (
+    HealthResponse,
+    ProcessVideoRequest,
+    ProcessVideoResponse,
+    UploadVideoResponse,
+    VideoResponse,
+)
+from app.services.blob_storage import BlobStorageService
 from app.services.factory import build_pipeline
 from app.services.queue import ServiceBusQueueService
 from app.utils.logger import app_logger
 
 router = APIRouter()
+
+UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024
 
 
 def _document_to_response(document: dict) -> VideoResponse:
@@ -44,6 +57,68 @@ async def _run_pipeline_background(video_id: str, blob_name: str, title: str | N
     """Execute the processing pipeline in the background without blocking the request."""
     pipeline = build_pipeline()
     await pipeline.process(video_id=video_id, blob_name=blob_name, title=title)
+
+
+@router.post("/upload-video", response_model=UploadVideoResponse, status_code=status.HTTP_201_CREATED)
+async def upload_video(file: UploadFile = File(...), title: str | None = Form(None)) -> UploadVideoResponse:
+    """Stream an uploaded video file to disk, push it to the temp blob container, and record it."""
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in settings.allowed_extensions_list:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file extension '{extension}'. Allowed: {', '.join(settings.allowed_extensions_list)}",
+        )
+
+    video_id = str(uuid.uuid4())
+    blob_name = f"{video_id}{extension}"
+    local_path = Path(settings.storage_temp_dir) / blob_name
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+
+    total_bytes = 0
+    try:
+        async with aiofiles.open(local_path, "wb") as destination:
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                total_bytes += len(chunk)
+                if total_bytes > settings.max_upload_size_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"File exceeds maximum allowed size of {settings.max_upload_size_mb} MB",
+                    )
+                await destination.write(chunk)
+    except HTTPException:
+        if local_path.exists():
+            os.remove(local_path)
+        raise
+    finally:
+        await file.close()
+
+    blob_storage = BlobStorageService()
+    try:
+        temp_blob_path = blob_storage.build_blob_path(settings.folder_temp, blob_name)
+        await blob_storage.upload_file(settings.container_temp, temp_blob_path, str(local_path))
+    finally:
+        await blob_storage.close()
+        if local_path.exists():
+            os.remove(local_path)
+
+    videos_collection: AsyncIOMotorCollection = get_videos_collection()
+    now = datetime.now(timezone.utc)
+    await videos_collection.update_one(
+        {"_id": video_id},
+        {
+            "$set": {
+                "title": title,
+                "status": VideoStatus.UPLOADING.value,
+                "original_size": total_bytes,
+                "updated_at": now,
+            },
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+
+    app_logger.info("Uploaded video '{}' ({} bytes) to temp container as '{}'", video_id, total_bytes, temp_blob_path)
+    return UploadVideoResponse(videoId=video_id, blobName=temp_blob_path, originalSize=total_bytes)
 
 
 @router.post("/process-video", response_model=ProcessVideoResponse, status_code=status.HTTP_202_ACCEPTED)
