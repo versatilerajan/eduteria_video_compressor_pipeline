@@ -3,7 +3,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as video_router
 from app.config.settings import settings
@@ -66,9 +65,6 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(video_router, tags=["videos"])
-
-    static_dir = Path(__file__).resolve().parent / "static"
-    application.mount("/admin", StaticFiles(directory=str(static_dir), html=True), name="admin")
 
     return application
 
